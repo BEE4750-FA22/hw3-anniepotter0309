@@ -38,6 +38,9 @@ x_g - installed capacity of generation type g [MW]
 y_g,t - production from generation type g at time t [MW]
 
 ```julia
+using JuMP
+using HiGHS
+
 energy_model = Model(HiGHS.Optimizer)
 generators = ["geothermal", "coal", "CCGT", "CT", "Wind", "Solar"]
 G = 1:length(generators)
