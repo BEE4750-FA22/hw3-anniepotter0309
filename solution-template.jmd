@@ -1,4 +1,4 @@
-ls---
+---
 title: "BEE 4750/5750 Homework 3"
 author: "Anne Potter (ap674)"
 date: `j import Dates; Dates.Date(Dates.now())`
@@ -33,51 +33,58 @@ solar_cf = [0, 0, 0, 0, 0, 0, 0.20, 0.57, 0.80, 0.93, 0.99, 0.99, 0.85, 0.99, 0.
 # Problem 1
 
 ## Problem 1.1
-Decision Variables:
-x_g - installed capacity of generation type g [MW]
-y_g,t - production from generation type g at time t [MW]
-
-```julia
-using JuMP
-using HiGHS
-
-energy_model = Model(HiGHS.Optimizer)
-generators = ["geothermal", "coal", "CCGT", "CT", "Wind", "Solar"]
-G = 1:length(generators)
-T = 1:length(hours)
-@variable(energy_model, x[G]    >= 0) 
-@variable(energy_model, y[G, T] >= 0) 
+```math
+\text{Decision Variables:} \\
+x_g     - \text{installed capacity of generation type g [MW]} \\
+y_g,t   - \text{production from generation type g at time t [MW]}\\
+nse_t   - \text{non served energy at time t [MW]}\\
 ```
 
 ## Problem 1.2
-min Cost = investment cost + operating cost
-
-```julia
-@objective(energy_model, Min, investment_cost*x + sum(op_cost*y))
+```math
+\text{min Cost} = \text{investment cost} [$/MW*yr] + \text{operating cost} [$/MW*yr] + \text{non-served energy cost} [$/MW*yr]
 ```
 
 ## Problem 1.3
-Constraints:
-min cost = sum( investment cost * x_g) + sum( sum( operating cost * y_g,t))
-
-```julia
-avail       = zeros(G, T)
-avail[1, :] = thermal_cf[1]
-avail[2, :] = thermal_cf[2]
-avail[3, :] = thermal_cf[3]
-avail[4, :] = thermal_cf[4]
-avail[5, :] = wind_cf
-avail[6, :] = solar_cf
-
-# production at each generator cannot exceed generation capacity
-@constraint(energy_model, availability[g in G, t in T], y[g, t] <= avail[g, t] * x[g])
-# total generation should be equal to the demand
-@constraint(energy_model, load[t in T], sum(y[:,t]) == demand[t])
+```math
+\text{Constraints:}\\
+\text{1. Energy produced at each generator cannot exceep generation capacity}\\
+\text{2. Total generation and non-served energy cannot exceed demand}\\
+\text{3. x, y, nse cannot be negative}\\
 ```
 
 ## Problem 1.4
 ```julia
-print(energy_model)
+#1.1
+using JuMP
+using HiGHS
+
+energy_model = Model(HiGHS.Optimizer);
+generators = ["geothermal", "coal", "CCGT", "CT", "Wind", "Solar"];
+G = 1:length(generators);
+T = 1:length(hours);
+@variable(energy_model,   x[G]    >= 0); 
+@variable(energy_model,   y[G, T] >= 0); 
+@variable(energy_model, nse[T]    >= 0);
+
+#1.2
+@objective(energy_model, Min, investment_cost'*x + 365*(sum(op_cost'*y) + sum(nse)*1000))
+
+#1.3
+cf      = zeros(6, 24);
+for i in 1:24
+    cf[1, i] = thermal_cf[1];
+    cf[2, i] = thermal_cf[2];
+    cf[3, i] = thermal_cf[3];
+    cf[4, i] = thermal_cf[4];
+end
+cf[5, :] .= wind_cf;
+cf[6, :] .= solar_cf;
+
+# production at each generator cannot exceed generation capacity
+@constraint(energy_model, availability[g in G, t in T], y[g, t] <= cf[g, t] * x[g]);
+# total generation should be equal to the demand
+@constraint(energy_model, load[t in T], sum(y[:,t]) + nse[t] == demand[t]);
 ```
 
 ## Problem 1.5
@@ -87,6 +94,7 @@ objective_value(energy_model)
 
 value.(x)
 value.(y)
+value.(nse)
 
 using DataFrames
 generation = [sum(value.(y).data[g,:]) for g in G]
@@ -97,21 +105,159 @@ results = DataFrame(
             "Generated (GWh)" => generation/1000
             )
 ```
+The amount of each generation type that the utility should build can be seen in the Data Frame:
+1704 MW of CCGT, 881 MW of CT, 1238 MW of Wind and 2729 MW of Solar. The total cost is $912 million.
+There will be no non-served energy.
 
 ## Problem 1.6
 ```julia
+using Plots
+gr()
+import Pkg;
+Pkg.add("Measures")
+using Measures
+
+plot(transpose(value.(y).data),
+        label=permutedims(generators),
+        xlabel="Hour",
+        ylabel="Generated Electricity (MW)",
+        color_palette=:tol_muted,
+        thickness_scaling=1.45, linewidth=3,
+        size=(700,700), left_margin=5mm,
+        bottom_margin=5mm,
+        legendfontsize=14, ticksize=13,
+        guidefontsize=14
+        )
+areaplot(transpose(value.(y).data),
+        label=permutedims(generators),
+        xlabel="Hour",
+        ylabel="Generated Electricity (MW)",
+        color_palette=:tol_muted,
+        thickness_scaling=1.45,
+        size=(700,700), left_margin=5mm,
+        bottom_margin=5mm, grid=:false,
+        legendfontsize=14, ticksize=13,
+        guidefontsize=14);
+plot!(demand, color=:red, label="demand", linestyle=:dash)
 ```
 
 # Problem 2
 
 ## Problem 2.1
+Nothing changes in this scenario, except for the addition of one constraint. The total emissions must
+be less than or equal to the standard, 1.5 MtCO2/yr. The objective remains the same, as we are still
+trying to expand a nonexistant infrastructure, so cost is still a limitation. There are no new variables.
 
 ## Problem 2.2
+```julia
+energy_model2 = Model(HiGHS.Optimizer)
+generators = ["geothermal", "coal", "CCGT", "CT", "Wind", "Solar"];
+G = 1:length(generators);
+T = 1:length(hours);
+@variable(energy_model2,   x[G]    >= 0); 
+@variable(energy_model2,   y[G, T] >= 0); 
+@variable(energy_model2, nse[T]    >= 0);
+@objective(energy_model2, Min, investment_cost'*x + 365*(sum(op_cost'*y) + sum(nse)*1000))
+cf      = zeros(6, 24)
+for i in 1:24
+    cf[1, i] = thermal_cf[1];
+    cf[2, i] = thermal_cf[2];
+    cf[3, i] = thermal_cf[3];
+    cf[4, i] = thermal_cf[4];
+end
+cf[5, :] .= wind_cf;
+cf[6, :] .= solar_cf;
+
+# production at each generator cannot exceed generation capacity
+@constraint(energy_model2, availability[g in G, t in T], y[g, t] <= cf[g, t] * x[g])
+# total generation should be equal to the demand
+@constraint(energy_model2, load[t in T], sum(y[:,t]) + nse[t] == demand[t])
+emit_limit = 1500000 #MtCO2/yr
+# total emissions should be less than or equal to the regulation
+@constraint(energy_model2, emissions[g in G], 365*(sum(y[g,:]*co2_emissions[g])) <= emit_limit)
+```
 
 ## Problem 2.3
+```julia
+optimize!(energy_model2)
+objective_value(energy_model2)
+
+value.(x)
+value.(y)
+value.(nse)
+
+using DataFrames
+generation = [sum(value.(y).data[g,:]) for g in G]
+
+results = DataFrame(
+            "Resource"         => generators,
+            "Installed (MW)"   => value.(x).data,
+            "Generated (GWh)"  => generation/1000,
+            )
+```
+The amount of each generation type that the utility should build can be seen in the Data Frame:
+814 MW of CCGT, 1551 MW of CT, 2669 MW of Wind and 3015 MW of Solar. The total cost is $934 million.
+There will be no non-served energy. There is still no Geothermal or coal usage, as seen in problem 1,
+but the breakdown of how much of each generation type should be built is slightly different. Plan 2
+is $22 million more expensive.
 
 ## Problem 2.4
+```julia
+plot(transpose(value.(y).data),
+        label=permutedims(generators),
+        xlabel="Hour",
+        ylabel="Generated Electricity (MW)",
+        color_palette=:tol_muted,
+        thickness_scaling=1.45, linewidth=3,
+        size=(700,700), left_margin=5mm,
+        bottom_margin=5mm,
+        legendfontsize=14, ticksize=13,
+        guidefontsize=14
+        )
+areaplot(transpose(value.(y).data),
+        label=permutedims(generators),
+        xlabel="Hour",
+        ylabel="Generated Electricity (MW)",
+        color_palette=:tol_muted,
+        thickness_scaling=1.45,
+        size=(700,700), left_margin=5mm,
+        bottom_margin=5mm, grid=:false,
+        legendfontsize=14, ticksize=13,
+        guidefontsize=14);
+plot!(demand, color=:red, label="demand", linestyle=:dash)
+```
+Plan 2 uses more CCGT and wind generation types and less CT when solar is not available.
 
 ## Problem 2.5
+```julia
+energy_model3 = Model(HiGHS.Optimizer)
+generators = ["geothermal", "coal", "CCGT", "CT", "Wind", "Solar"];
+G = 1:length(generators);
+T = 1:length(hours);
+@variable(energy_model3,   x[G]    >= 0); 
+@variable(energy_model3,   y[G, T] >= 0); 
+@variable(energy_model3, nse[T]    >= 0);
+@objective(energy_model3, Min, investment_cost'*x + 365*(sum(op_cost'*y) + sum(nse)*1000))
+cf      = zeros(6, 24)
+for i in 1:24
+    cf[1, i] = thermal_cf[1];
+    cf[2, i] = thermal_cf[2];
+    cf[3, i] = thermal_cf[3];
+    cf[4, i] = thermal_cf[4];
+end
+cf[5, :] .= wind_cf;
+cf[6, :] .= solar_cf;
+
+# production at each generator cannot exceed generation capacity
+@constraint(energy_model3, availability[g in G, t in T], y[g, t] <= cf[g, t] * x[g])
+# total generation should be equal to the demand
+@constraint(energy_model3, load[t in T], sum(y[:,t]) + nse[t] == demand[t])
+emit_limit = 1501000 #MtCO2/yr
+# total emissions should be less than or equal to the regulation
+@constraint(energy_model3, emissions[g in G], 365*(sum(y[g,:]*co2_emissions[g])) <= emit_limit)
+optimize!(energy_model3)
+objective_value(energy_model3)
+```
+There is a $55,000 benefit to increasing emission standards by 1000 tCO2/yr.
 
 # References
